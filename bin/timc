@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+# TIMC CLI shim (POSIX / Git Bash). Hooks call src/cli.js directly via node.
+DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+exec node "$DIR/../src/cli.js" "$@"

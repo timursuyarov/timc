@@ -1,0 +1,10 @@
+{
+  "name": "timc",
+  "displayName": "TIMC",
+  "version": "0.1.0",
+  "description": "Durable, resumable engineering pipeline attached to a Git repository. Phases, gates, evidence-verified steps, checkpoint/resume.",
+  "keywords": ["workflow", "pipeline", "durable", "resume", "evidence", "state-machine"],
+  "license": "MIT",
+  "defaultEnabled": false,
+  "hooks": "./hooks/hooks.json"
+}

@@ -1,0 +1,21 @@
+{
+  "name": "timc",
+  "version": "0.1.0",
+  "description": "TIMC — durable, resumable engineering pipeline attached to a Git repository. Claude Code plugin + deterministic CLI.",
+  "type": "module",
+  "license": "MIT",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "timc": "./bin/timc"
+  },
+  "scripts": {
+    "test": "node --test",
+    "typecheck": "npx -y -p typescript@5 tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "yaml": "^2.9.0"
+  }
+}
