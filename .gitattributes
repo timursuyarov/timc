@@ -1,0 +1,4 @@
+# The shim is a POSIX shell script: CRLF would break its shebang on Linux/macOS.
+* text=auto eol=lf
+*.cmd text eol=crlf
+bin/timc text eol=lf
