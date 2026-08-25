@@ -74,6 +74,10 @@ export async function newTask({ args, ctx }) {
   writeAtomic(path.join(dir, 'implementation-log.md'), T.implementationLogMd(stub));
   writeAtomic(path.join(dir, 'validation.md'), T.validationMd(stub));
 
+  // Anchor the task so `timc final` can diff what it actually changed.
+  const startHead = G.head(ctx.codeRoot);
+  if (startHead) G.updateRef(ctx.codeRoot, `refs/timc/tasks/${id}/start`, startHead);
+
   const task = loadTask(ctx.P, id);
   ctx.task = task;
   ctx.state.activeTask = id;

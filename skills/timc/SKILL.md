@@ -43,8 +43,9 @@ essential is missing, that is a bug in the plan — say so.
 5. **Gates are not negotiable.** `timc phase advance` prints exactly what is
    missing. Satisfy it, or record why it does not apply
    (`timc phase set <P> --force --reason "..."`) — never work around it silently.
-6. **Never invent a user decision.** A decision attributed to the user must be
-   backed by a real `timc answer` event. Ask with `timc ask "<question>"`.
+6. **Never invent a user decision.** `timc decide ... --by user` requires
+   `--evidence Q-00N` (an answered question) or `events#seq=N` (an
+   `ANSWER_RECEIVED` event) and refuses anything else. Ask with `timc ask`.
 
 ## Interview: a design tree, worked in rounds
 
@@ -129,6 +130,24 @@ timc phase advance
 timc step add --goal "fix label" --touches "src/**" --validate "npx tsc --noEmit"
 timc step start IMP-001 && timc run -- npx tsc --noEmit && timc step complete IMP-001
 ```
+
+## Decisions and the final record
+
+Record a decision the moment it is made — not at the end, when the reasoning is
+gone. `decisions.md` is **generated** from `task.yaml`; never edit it by hand.
+
+```bash
+timc decide "Can one payment have several partial refunds?" \
+  --decision "yes, capped at the captured amount" \
+  --reason "matches how the bank reports them" \
+  --type BUSINESS --by user --evidence Q-001
+```
+
+At the end, `timc final --render` writes `final.md` from durable state: phases
+(including any that were **bypassed**), steps and their evidence, decisions,
+interview answers, acceptance criteria, seams, the commands that were actually
+run, and the diff range. Only two sections are yours to write — *Differences
+from the plan* and *Known limitations* — and re-rendering preserves them.
 
 ## Interrupted work
 

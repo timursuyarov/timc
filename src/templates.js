@@ -367,18 +367,20 @@ Use \`--kind expand|migrate|contract\`; TIMC enforces the ordering.
 
 export const DECISIONS_MD = `# Decisions
 
-\`\`\`yaml
-# - id: DEC-001
-#   date: 2026-01-01
-#   type: IMPLEMENTATION      # BUSINESS | ARCHITECTURE | IMPLEMENTATION | TEMPORARY_ASSUMPTION
-#   question: …
-#   options: [ …, … ]
-#   decision: …
-#   reason: …
-#   decision_maker: user      # user | agent:<role>
-#   evidence: events#seq=0    # REQUIRED when decision_maker is user
-#   reversible: true
+_Generated from \`task.yaml\`. Record decisions with \`timc decide\`, not by editing
+this file:_
+
+\`\`\`bash
+timc decide "Can one payment have several partial refunds?" \\
+  --decision "yes, capped at the captured amount" \\
+  --reason "matches how the bank reports them" \\
+  --type BUSINESS --by user --evidence Q-001
 \`\`\`
+
+A decision attributed to the user needs the answer that carries it
+(\`--evidence Q-00N\` or \`events#seq=N\`) — otherwise TIMC rejects it.
+
+_No decisions recorded yet._
 `;
 
 export const RISKS_MD = `# Risks

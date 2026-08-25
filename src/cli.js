@@ -23,6 +23,8 @@ const COMMANDS = {
   drift: () => import('./commands/drift.js'),
   frontier: () => import('./commands/frontier.js'),
   questions: () => import('./commands/frontier.js'),
+  decide: () => import('./commands/decide.js'),
+  final: () => import('./commands/final.js'),
   suspend: () => import('./commands/suspend.js'),
   ask: () => import('./commands/suspend.js'),
   answer: () => import('./commands/suspend.js'),
@@ -37,7 +39,7 @@ const COMMANDS = {
 // `run` and `record` only append to the evidence log, so they stay lock-free:
 // a hook must never lose evidence because another session holds the lock.
 const MUTATING = new Set([
-  'init', 'new', 'step', 'phase', 'checkpoint', 'resume',
+  'init', 'new', 'step', 'phase', 'checkpoint', 'resume', 'decide', 'final',
   'doctor', 'suspend', 'ask', 'answer', 'block', 'unblock', 'pause', 'abandon',
 ]);
 
@@ -55,6 +57,8 @@ const HELP = `timc — durable engineering pipeline (V0)
   timc checkpoint [--auto]       Snapshot state + dirty worktree
   timc resume [--json]           Reconcile state with git and say what to do
   timc doctor [--rebuild]        Verify / rebuild runtime from durable truth
+  timc decide "<q>" --decision "..." --reason "..." [--by user --evidence Q-001]
+  timc final --render            Regenerate final.md from durable state
   timc drift                     Compare the diff against the plan's touches[]
   timc ask|answer|block|unblock|pause|abandon
   timc selftest                  Run the acceptance tests

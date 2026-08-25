@@ -26,6 +26,8 @@ To'liq arxitektura: `compensation/.claude/plans/timc-agentic-pipeline-v1.md`
 | `timc checkpoint` | Holat + iflos worktree snapshot'i (branch'ga commit qilmasdan) |
 | `timc resume` | task.yaml ↔ event log ↔ evidence ↔ git ni solishtiradi, aniq tavsiya beradi |
 | `timc doctor --rebuild` | `runtime/` ni committed haqiqatdan qayta quradi |
+| `timc decide` | Qaror yozadi; `--by user` uchun javob dalili majburiy. `decisions.md` generatsiya qilinadi |
+| `timc final --render` | `final.md` ni durable holatdan yozadi; qo'lda yozilgan 2 bo'lim saqlanadi |
 | `timc drift` | O'zgargan fayllarni reja `touches[]` bilan solishtiradi |
 
 ## O'rnatish / install
@@ -98,5 +100,5 @@ test/           acceptance + unit
 ## V0 da yo'q (V1 rejasida)
 
 Interview / spec / planner / tester subagentlari · `PreCompact` flush ·
-`timc lint` (dictionary, fabricated approval, secrets) · `final --render` ·
-`timc adopt` · usage/cost hisobi · Codex host adapter.
+`timc lint` (dictionary, secrets) · `timc adopt` · usage/cost hisobi ·
+Codex host adapter.
