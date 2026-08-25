@@ -12,7 +12,7 @@ async function ready(t, name) {
   timc(repo, ['init']);
   timc(repo, ['new', 'fix label typo', '--json']);
   timc(repo, ['phase', 'advance']);
-  timc(repo, ['step', 'add', '--goal', 'a', '--touches', 'src/**', '--validate', 'node --version']);
+  timc(repo, ['step', 'add', '--goal', 'a', '--delivers', 'the label renders correctly', '--touches', 'src/**', '--validate', 'node --version']);
   timc(repo, ['step', 'start', 'IMP-001']);
   return repo;
 }
@@ -50,7 +50,7 @@ test('evidence from before the step started does not count', async (t) => {
   timc(repo, ['init']);
   timc(repo, ['new', 'fix label typo', '--json']);
   timc(repo, ['phase', 'advance']);
-  timc(repo, ['step', 'add', '--goal', 'a', '--touches', 'src/**', '--validate', 'node --version']);
+  timc(repo, ['step', 'add', '--goal', 'a', '--delivers', 'the label renders correctly', '--touches', 'src/**', '--validate', 'node --version']);
   // run first, start second
   timc(repo, ['run', '--', 'node --version']);
   await new Promise((r) => setTimeout(r, 1100)); // timestamps have second precision

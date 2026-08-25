@@ -21,6 +21,8 @@ const COMMANDS = {
   resume: () => import('./commands/resume.js'),
   doctor: () => import('./commands/doctor.js'),
   drift: () => import('./commands/drift.js'),
+  frontier: () => import('./commands/frontier.js'),
+  questions: () => import('./commands/frontier.js'),
   suspend: () => import('./commands/suspend.js'),
   ask: () => import('./commands/suspend.js'),
   answer: () => import('./commands/suspend.js'),
@@ -47,6 +49,7 @@ const HELP = `timc — durable engineering pipeline (V0)
   timc next [--json]             The single next allowed action
   timc brief [--budget N]        Deterministic context pack for the current phase
   timc phase advance|set <P>     Move phases (gates are enforced)
+  timc frontier                  What is askable / workable right now
   timc step add|list|start|complete|fail|skip
   timc run -- <cmd>              Run a command and record evidence
   timc checkpoint [--auto]       Snapshot state + dirty worktree

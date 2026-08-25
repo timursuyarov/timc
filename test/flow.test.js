@@ -28,7 +28,7 @@ test('trivial task: init -> build -> evidence -> close', async (t) => {
   assert.equal(timc(repo, ['phase', 'advance', '--json']).json.to, 'BUILDING');
 
   // --- step add / start -------------------------------------------------
-  const added = timc(repo, ['step', 'add', '--goal', 'fix the label', '--touches', 'src/**', '--validate', 'node --version', '--json']);
+  const added = timc(repo, ['step', 'add', '--goal', 'fix the label', '--delivers', 'the reestr page shows the corrected label', '--touches', 'src/**', '--validate', 'node --version', '--json']);
   assert.equal(added.code, 0, added.err);
   assert.equal(added.json.id, 'IMP-001');
   assert.equal(timc(repo, ['step', 'start', 'IMP-001']).code, 0);
@@ -58,7 +58,7 @@ test('cold start: a wiped runtime is rebuilt from durable truth', async (t) => {
   timc(repo, ['init']);
   timc(repo, ['new', 'fix label typo', '--json']);
   timc(repo, ['phase', 'advance']);
-  timc(repo, ['step', 'add', '--goal', 'a', '--touches', 'src/**', '--validate', 'node --version']);
+  timc(repo, ['step', 'add', '--goal', 'a', '--delivers', 'the label renders correctly', '--touches', 'src/**', '--validate', 'node --version']);
   timc(repo, ['step', 'start', 'IMP-001']);
 
   // Simulate a lost machine / wiped cache: runtime is gitignored on purpose.
@@ -82,7 +82,7 @@ test('kill mid-step: interrupted work is reported, never silently complete', asy
   timc(repo, ['init']);
   timc(repo, ['new', 'fix label typo', '--json']);
   timc(repo, ['phase', 'advance']);
-  timc(repo, ['step', 'add', '--goal', 'edit source', '--touches', 'src/**', '--validate', 'node --version']);
+  timc(repo, ['step', 'add', '--goal', 'edit source', '--delivers', 'the module exports the new constant', '--touches', 'src/**', '--validate', 'node --version']);
   timc(repo, ['step', 'start', 'IMP-001']);
 
   // work in progress, nothing validated
@@ -109,7 +109,7 @@ test('a step marked done without evidence is reopened by resume', async (t) => {
   timc(repo, ['init']);
   timc(repo, ['new', 'fix label typo', '--json']);
   timc(repo, ['phase', 'advance']);
-  timc(repo, ['step', 'add', '--goal', 'a', '--touches', 'src/**', '--validate', 'node --version']);
+  timc(repo, ['step', 'add', '--goal', 'a', '--delivers', 'the label renders correctly', '--touches', 'src/**', '--validate', 'node --version']);
   timc(repo, ['step', 'start', 'IMP-001']);
 
   // Tamper with the durable truth the way a hand-edit (or a broken agent) would.
@@ -139,10 +139,17 @@ test('gates block a standard task until its artifacts exist', async (t) => {
   assert.equal(blocked.code, 2);
   assert.match(blocked.err, /Confirmed facts/, 'an untouched interview template must not pass the gate');
 
-  // Writing real interview content unblocks it — the gate checks content, not headings.
+  // Writing real interview content unblocks that check — the gate reads content,
+  // not headings — but the design tree must also be worked to an empty frontier.
   const interview = path.join(repo, '.timc', 'tasks', 'TASK-001-add-bank-integration-webhook', 'interview.md');
   fs.writeFileSync(interview, fs.readFileSync(interview, 'utf8')
     .replace('## Confirmed facts\n', '## Confirmed facts\n\n- the webhook is called once per payment\n'));
+  const stillOpen = timc(repo, ['phase', 'advance']);
+  assert.equal(stillOpen.code, 2);
+  assert.match(stillOpen.err, /asked nothing/i);
+
+  timc(repo, ['ask', 'Retry a failed webhook delivery?', '--recommend', 'yes, 3 times with backoff']);
+  timc(repo, ['answer', 'Q-001', 'yes, 3 times with backoff']);
   assert.equal(timc(repo, ['phase', 'advance', '--json']).json.to, 'SPECIFYING');
 
   // A step cannot be started while the task is not in BUILDING.

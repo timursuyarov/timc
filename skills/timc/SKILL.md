@@ -46,16 +46,78 @@ essential is missing, that is a bug in the plan — say so.
 6. **Never invent a user decision.** A decision attributed to the user must be
    backed by a real `timc answer` event. Ask with `timc ask "<question>"`.
 
+## Interview: a design tree, worked in rounds
+
+The interview is not a questionnaire. Model it as a **design tree**: every
+decision branches into the decisions hanging off it. The **frontier** is every
+decision whose prerequisites are already settled.
+
+- Ask the **whole frontier in one round**, numbered, **each with your
+  recommended answer**. Then stop and wait.
+- **Facts are your job, never the user's.** If a question needs something the
+  filesystem, git, or a tool can answer, go find it — dispatch a subagent if it
+  is slow. Only *decisions* go to the user.
+- A question whose answer depends on a question still open belongs to a **later
+  round**. Declare that with `--depends`.
+- The interview closes when the frontier is empty — not when it feels like enough.
+
+```bash
+timc ask "Can one payment have several partial refunds?" \
+         --recommend "yes, capped at the captured amount" --risk high
+timc ask "How is a partial refund split across accruals?" \
+         --recommend "pro rata on the remaining balance" --depends Q-001
+timc frontier                       # what is askable right now
+timc answer Q-001 "yes, capped"     # recorded verbatim, linked to an event
+```
+
+`timc ask` refuses a question with no recommendation: an interview that hands the
+thinking back to the user has not done its job.
+
+## Spec: synthesis, and name the seams
+
+Do **not** interview here — synthesize what the interview already settled.
+Two things people skip and TIMC checks:
+
+- **Seams.** Name where this gets tested, in `spec.md` front matter. Prefer an
+  existing seam, use the highest one you can, and the fewer the better — one is
+  ideal. A **new** seam needs the user's approval (`approved_by`).
+- **No file paths, no code snippets.** They go stale in a week. The exception is
+  a snippet that encodes a decision more precisely than prose can (state machine,
+  schema, type shape) — trimmed to the decision.
+
+## Plan: tracer bullets, not layers
+
+Each step is a **tracer bullet**: a narrow but *complete* path through every
+layer, demoable on its own, sized for one fresh context window.
+`--delivers` is required and must describe end-to-end behaviour.
+
+> "Domain model", "Repository layer", "API controller" are **horizontal** slices.
+> Nothing validates them and nothing demos them — TIMC flags them.
+
+Prefactor first: make the change easy, then make the easy change.
+
+**Wide refactors are the exception.** One mechanical change whose blast radius
+covers the codebase cannot land green as a slice. Sequence it and TIMC enforces
+the ordering:
+
+```bash
+timc step add --kind expand   --goal "add new column beside the old"   ...
+timc step add --kind migrate  --goal "move package A"  --depends R-001 ...
+timc step add --kind migrate  --goal "move package B"  --depends R-001 ...
+timc step add --kind contract --goal "delete the old column" --depends R-002,R-003
+```
+
 ## Typical flow
 
 ```bash
 timc new "add partial refunds"     # classifies the track deterministically
 timc next                          # -> interview / spec / plan, per track
+timc ask ... / timc answer ...     # rounds until the frontier is empty
 timc phase advance                 # gate-checked
-timc step add --goal "..." --touches "src/**" --validate "dotnet build"
+timc step add --goal "..." --delivers "..." --touches "src/**" --validate "dotnet test --filter Refund"
 timc step start IMP-001
 # ... implement (subagent on non-trivial tracks) ...
-timc run -- dotnet build
+timc run -- dotnet test --filter Refund
 timc step complete IMP-001
 ```
 
@@ -90,9 +152,16 @@ instead of stalling invisibly.
 
 ## Reference
 
+- `timc frontier` — askable questions and workable steps, right now
 - `timc status -v` — engineering view (per-step evidence, revisions, signals)
 - `timc drift` — changed files vs the plan's declared globs
 - `timc checkpoint` — snapshot state + dirty worktree (no branch commit)
 - `timc doctor --rebuild` — rebuild runtime state from durable truth
 - `timc ask | answer | block | unblock | pause | abandon`
 - `.timc/AGENTS.md` — the same contract, for any other agent
+
+The interview, spec and slicing mechanics above are adapted from
+[mattpocock/skills](https://github.com/mattpocock/skills) (`grilling`, `to-spec`,
+`to-tickets`). TIMC's contribution is making them **checkable**: the frontier,
+the seams, `delivers`, and the expand→migrate→contract ordering are data the
+gates read, not advice the model may forget.

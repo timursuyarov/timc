@@ -63,7 +63,7 @@ test('editing outside the step reports drift without blocking', async (t) => {
   timc(repo, ['init']);
   timc(repo, ['new', 'fix label typo', '--json']);
   timc(repo, ['phase', 'advance']);
-  timc(repo, ['step', 'add', '--goal', 'a', '--touches', 'src/**', '--validate', 'node --version']);
+  timc(repo, ['step', 'add', '--goal', 'a', '--delivers', 'the label renders correctly', '--touches', 'src/**', '--validate', 'node --version']);
   timc(repo, ['step', 'start', 'IMP-001']);
 
   const res = timc(repo, ['guard', 'write', '--hook'], { stdin: writeHookPayload(path.join(repo, 'package.json'), { cwd: repo }) });

@@ -18,6 +18,7 @@ To'liq arxitektura: `compensation/.claude/plans/timc-agentic-pipeline-v1.md`
 | `timc init` | `.timc/` ni yaratadi, **o'zining git repo'si** sifatida (D-2), kod repo'sining `.git/info/exclude` ga qo'shadi, stack'ni aniqlaydi |
 | `timc new "<title>"` | Task yaratadi, track'ni deterministik skorlaydi (trivial / standard / high_risk) |
 | `timc next` | Hozir nima qilish kerakligining yagona manbasi (`--json` bilan agent uchun) |
+| `timc ask / answer / frontier` | Interview = **design tree, rounds bo'yicha**: frontier bo'shamaguncha faza yopilmaydi; har savol tavsiya bilan |
 | `timc brief` | Fazaga mos, token-budjetli kontekst paketi (SessionStart hook shuni inject qiladi) |
 | `timc phase advance` | Gate tekshiruvi bilan faza almashtirish; nima yetishmayotganini aniq aytadi |
 | `timc step add/start/complete` | **Evidence bo'lmasa yopilmaydi** |
@@ -56,6 +57,15 @@ timc init
   inject qiladi; model "qarab qo'yishni eslashi" shart emas.
 - **Cache hech qachon yutmaydi.** `task.yaml` (committed) > `events.ndjson` >
   `state.json`. Nomuvofiqlikda `doctor --rebuild`.
+- **Interview o'lchanadi.** Savollar `depends_on` bilan daraxt hosil qiladi;
+  gate = **frontier bo'sh**. "Yetarli so'radim" degan qaror modelda emas.
+- **Steplar vertikal.** `--delivers` majburiy: har step — tracer bullet, o'zi
+  demo qilinadigan. Layer-shaped ("Domain model", "API controller") belgilanadi.
+  Keng refaktoring uchun `expand → migrate* → contract` tartibi majburlanadi.
+
+Interview / spec / slicing mexanikasi [mattpocock/skills](https://github.com/mattpocock/skills)
+dagi `grilling`, `to-spec`, `to-tickets` skill'laridan olingan; TIMC ularni
+**tekshiriladigan** ma'lumotga aylantiradi.
 
 ## Testlar / tests
 

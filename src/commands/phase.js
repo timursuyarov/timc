@@ -1,5 +1,5 @@
 import { appendEvent, commitState, saveTask } from '../store.js';
-import { PHASES, PHASE_GATE, canAdvance, next as computeNext, phasePlan } from '../machine.js';
+import { PHASES, PHASE_GATE, canAdvance, next as computeNext, phasePlan, planAdvisories } from '../machine.js';
 import { nowIso } from '../io.js';
 import { c } from '../render.js';
 import { createCheckpoint } from './checkpoint.js';
@@ -93,9 +93,11 @@ function move({ args, ctx, to, forced, reason = null }) {
   commitState(ctx, `timc: ${ctx.task.id} ${from} → ${to}`);
 
   const hint = computeNext(ctx);
-  if (args.flags.json) { process.stdout.write(`${JSON.stringify({ from, to, forced, next: hint }, null, 2)}\n`); return 0; }
+  const notes = to === 'READY' || from === 'PLANNING' ? planAdvisories(ctx.task) : [];
+  if (args.flags.json) { process.stdout.write(`${JSON.stringify({ from, to, forced, advisories: notes, next: hint }, null, 2)}\n`); return 0; }
   process.stdout.write([
     `${forced ? c.yellow('!') : c.green('✓')} ${from} → ${c.bold(to)}${forced ? c.yellow(' (forced)') : ''}`,
+    ...notes.map((n) => `  ${c.yellow('!')} ${n}`),
     '',
     `${c.bold('Keyingi / next:')} ${hint.title}`,
     hint.why ? `  ${c.dim(hint.why)}` : '',

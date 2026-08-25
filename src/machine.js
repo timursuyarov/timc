@@ -121,6 +121,45 @@ export function hasContent(body) {
 export const stepsOf = (task) => (Array.isArray(task?.steps) ? task.steps : []);
 export const stepById = (task, id) => stepsOf(task).find((s) => s.id === id) ?? null;
 
+// ---------------------------------------------------------------------------
+// Interview model — a design tree worked in rounds.
+// Borrowed from mattpocock/skills `grilling`: the frontier is every decision
+// whose prerequisites are already settled. Encoding it as data (instead of
+// leaving it to the model's memory) makes the interview gate decidable.
+// ---------------------------------------------------------------------------
+
+export const questionsOf = (task) => (Array.isArray(task?.open_questions) ? task.open_questions : []);
+export const questionById = (task, id) => questionsOf(task).find((q) => q.id === id) ?? null;
+export const isAnswered = (q) => Boolean(q?.answer) || q?.status === 'superseded';
+
+/** Questions that can be asked right now: unanswered, prerequisites settled. */
+export function frontier(task) {
+  return questionsOf(task).filter((q) => !isAnswered(q)
+    && (q.depends_on ?? []).every((d) => isAnswered(questionById(task, d))));
+}
+
+/** Unanswered questions that are not in the frontier — and why they are stuck. */
+export function blockedQuestions(task) {
+  const front = new Set(frontier(task).map((q) => q.id));
+  return questionsOf(task)
+    .filter((q) => !isAnswered(q) && !front.has(q.id))
+    .map((q) => ({
+      id: q.id,
+      question: q.question,
+      waiting_on: (q.depends_on ?? []).filter((d) => !isAnswered(questionById(task, d))),
+    }));
+}
+
+export const STEP_KINDS = ['slice', 'prefactor', 'expand', 'migrate', 'contract'];
+
+/** Layer-shaped step titles: the classic horizontal-slice smell. */
+const LAYER_WORDS = /^(domain|entity|entities|repository|persistence|dal|service|application|api|controller|endpoint|frontend|ui|view|component|dto|contract|test|tests|migration)s?\b/i;
+
+export function looksHorizontal(step) {
+  const goal = String(step?.goal ?? '').trim();
+  return LAYER_WORDS.test(goal) && !step?.delivers;
+}
+
 export function depsSatisfied(task, step) {
   const deps = Array.isArray(step.depends_on) ? step.depends_on : [];
   return deps.every((d) => CLOSED_STEP.has(stepById(task, d)?.status));
@@ -158,6 +197,62 @@ function hasCycle(task) {
   return steps.some((s) => visit(s.id));
 }
 
+/** Does `stepId` depend on `targetId`, directly or through other steps? */
+export function dependsOnTransitively(task, stepId, targetId) {
+  const seen = new Set();
+  const walk = (id) => {
+    if (id === targetId) return true;
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return (stepById(task, id)?.depends_on ?? []).some(walk);
+  };
+  return (stepById(task, stepId)?.depends_on ?? []).some(walk);
+}
+
+/**
+ * A wide refactor cannot be a tracer bullet, so it is sequenced expand → migrate*
+ * → contract. The ordering is the whole point, so the CLI enforces it.
+ */
+export function expandContractProblems(task) {
+  const steps = stepsOf(task);
+  const expands = steps.filter((s) => s.kind === 'expand');
+  const migrates = steps.filter((s) => s.kind === 'migrate');
+  const contracts = steps.filter((s) => s.kind === 'contract');
+  const problems = [];
+
+  if (!expands.length && (migrates.length || contracts.length)) {
+    problems.push('migrate/contract steps exist without an expand step — a wide refactor starts by adding the new form beside the old');
+  }
+  for (const m of migrates) {
+    if (!expands.some((e) => dependsOnTransitively(task, m.id, e.id))) {
+      problems.push(`${m.id} (migrate) must be blocked by the expand step — migrating before expanding breaks the build`);
+    }
+  }
+  for (const cst of contracts) {
+    const unblocked = migrates.filter((m) => !dependsOnTransitively(task, cst.id, m.id));
+    if (unblocked.length) {
+      problems.push(`${cst.id} (contract) must be blocked by every migrate step — missing: ${unblocked.map((m) => m.id).join(', ')}`);
+    }
+  }
+  if (contracts.length > 1) problems.push('a wide refactor has one contract step, not several');
+  return problems;
+}
+
+/** Non-blocking smells worth showing the user before they approve a plan. */
+export function planAdvisories(task) {
+  const out = [];
+  for (const s of stepsOf(task)) {
+    if (looksHorizontal(s)) {
+      out.push(`${s.id}: "${s.goal}" reads like a layer, not a slice — a step should cut through every layer and be demoable on its own`);
+    }
+    const only = (s.validate ?? []).every((v) => /\b(build|tsc|compile|lint|format)\b/i.test(v));
+    if (only && (s.validate ?? []).length && s.kind !== 'prefactor' && s.kind !== 'expand') {
+      out.push(`${s.id}: validation only compiles — add a check that proves the behaviour, not just that it builds`);
+    }
+  }
+  return out;
+}
+
 /**
  * Guards keyed by the phase being entered.
  * @type {Record<string, (ctx: any, task: any) => string[]>}
@@ -176,6 +271,21 @@ export const GUARDS = {
     else if (/^\s*(?:[-*]\s+)?risk:\s*high\b/im.test(s['open questions'])) {
       missing.push('an open question is still marked risk: high — resolve it or lower the risk');
     }
+
+    // The interview is a design tree worked in rounds: it closes when the
+    // frontier is empty, not when someone decides they have asked enough.
+    const asked = questionsOf(task);
+    if (!asked.length) {
+      missing.push('no questions were recorded — an interview that asked nothing decided nothing (`timc ask`)');
+    } else {
+      const open = asked.filter((q) => !isAnswered(q));
+      if (open.length) {
+        const front = frontier(task);
+        missing.push(front.length
+          ? `${open.length} question(s) still unanswered, ${front.length} of them askable now (\`timc frontier\`)`
+          : `${open.length} question(s) unanswered and none are askable — their dependencies form a cycle (\`timc frontier\`)`);
+      }
+    }
     return missing;
   },
   ARCH_REVIEW(ctx, task) {
@@ -190,6 +300,18 @@ export const GUARDS = {
     if (!acs.length) missing.push('spec.md front matter needs at least one acceptance_criteria entry');
     const unknown = (meta?.assumptions ?? []).filter((a) => String(a?.level).toUpperCase() === 'UNKNOWN');
     if (unknown.length) missing.push(`${unknown.length} assumption(s) still UNKNOWN — confirm or downgrade the risk`);
+
+    // Seams decide whether the feature can be tested at all, so they are part
+    // of the spec, not an implementation detail discovered later.
+    const seams = Array.isArray(meta?.seams) ? meta.seams : [];
+    if (!seams.length) {
+      missing.push('spec.md declares no seams — name where this gets tested (prefer an existing seam, the highest one, ideally one)');
+    } else {
+      for (const s of seams) {
+        if (!s?.id || !s?.where) missing.push('every seam needs an id and a "where"');
+        else if (s.kind === 'new' && !s.approved_by) missing.push(`seam ${s.id} is new — a new seam needs the user's approval (approved_by)`);
+      }
+    }
     return missing;
   },
   READY(ctx, task) {
@@ -198,10 +320,12 @@ export const GUARDS = {
     if (!steps.length) missing.push('no steps — add them with `timc step add`');
     for (const s of steps) {
       if (!s.goal) missing.push(`${s.id}: goal is missing`);
+      if (!s.delivers) missing.push(`${s.id}: delivers is missing — say what end-to-end behaviour this slice makes work`);
       if (!Array.isArray(s.touches) || !s.touches.length) missing.push(`${s.id}: touches[] is missing (needed for drift detection)`);
       if (!Array.isArray(s.validate) || !s.validate.length) missing.push(`${s.id}: validate[] is missing (nothing could prove it works)`);
     }
     if (hasCycle(task)) missing.push('step dependencies contain a cycle');
+    missing.push(...expandContractProblems(task));
     const acs = (readSpecMeta(task)?.acceptance_criteria ?? []).map((a) => a.id).filter(Boolean);
     const covered = new Set(steps.map((s) => s.acceptance).filter(Boolean));
     const orphan = acs.filter((id) => !covered.has(id));
@@ -275,8 +399,11 @@ export function next(ctx) {
   }
   if (task.suspend) {
     const kind = task.suspend.kind;
+    const open = frontier(task);
     const cmd = {
-      AWAITING_USER: `timc answer <ID> "<answer>"`,
+      AWAITING_USER: open.length > 1
+        ? 'timc frontier'
+        : `timc answer ${open[0]?.id ?? '<ID>'} "<answer>"`,
       BLOCKED: 'timc unblock',
       PAUSED: 'timc resume',
       PAUSED_LIMIT: 'timc resume',
@@ -284,10 +411,23 @@ export function next(ctx) {
       ABANDONED: null,
     }[kind] ?? 'timc resume';
     return {
-      action: 'resolve_suspend',
-      title: `Suspended: ${kind}`,
+      action: kind === 'AWAITING_USER' ? 'answer_questions' : 'resolve_suspend',
+      title: kind === 'AWAITING_USER' && open.length
+        ? `${open.length} question(s) waiting for you`
+        : `Suspended: ${kind}`,
       why: task.suspend.reason ?? 'no reason recorded',
       command: cmd,
+      missing: kind === 'AWAITING_USER' ? open.map((q) => `${q.id}: ${q.question}`) : undefined,
+      phase: task.phase,
+    };
+  }
+
+  if (task.phase === 'FRAMING' && !questionsOf(task).length) {
+    return {
+      action: 'run_interview',
+      title: 'Interview not started',
+      why: 'work the design tree in rounds: ask the whole frontier, each question with a recommended answer',
+      command: 'timc ask "<question>" --recommend "<your recommended answer>"',
       phase: task.phase,
     };
   }

@@ -1,7 +1,8 @@
 import { appendEvent, commitState, saveTask } from '../store.js';
 import { verifyStep } from '../evidence.js';
 import {
-  CLOSED_STEP, actionableStep, depsSatisfied, matchesTouches, next as computeNext, stepById, stepsOf,
+  CLOSED_STEP, STEP_KINDS, actionableStep, depsSatisfied, looksHorizontal, matchesTouches,
+  next as computeNext, planAdvisories, stepById, stepsOf,
 } from '../machine.js';
 import { c } from '../render.js';
 import { createCheckpoint } from './checkpoint.js';
@@ -46,15 +47,26 @@ async function add({ args, ctx }) {
   const goal = String(args.flags.goal ?? args.positional.slice(1).join(' ') ?? '').trim();
   const touches = asArray(args.flags.touches);
   const validate = asCommands(args.flags.validate);
+  const delivers = String(args.flags.delivers ?? '').trim();
+  const kind = String(args.flags.kind ?? 'slice');
   if (!goal) { process.stderr.write('timc step add: --goal "<what this step achieves>" is required\n'); return 1; }
   if (!touches.length) { process.stderr.write('timc step add: --touches "<glob>[,<glob>]" is required (drift detection needs it)\n'); return 1; }
   if (!validate.length) { process.stderr.write('timc step add: --validate "<command>" is required (nothing could prove the step works)\n'); return 1; }
+  if (!STEP_KINDS.includes(kind)) { process.stderr.write(`timc step add: unknown --kind "${kind}" (${STEP_KINDS.join(' | ')})\n`); return 1; }
+  if (!delivers && kind === 'slice') {
+    process.stderr.write('timc step add: --delivers "<end-to-end behaviour this makes work>" is required for a slice.\n'
+      + '  A step is a tracer bullet: a narrow but complete path through every layer, demoable on its own.\n'
+      + '  For a layer-shaped chore use --kind prefactor|expand|migrate|contract.\n');
+    return 1;
+  }
 
   const id = String(args.flags.id ?? nextStepId(ctx.task, String(args.flags.prefix ?? 'IMP')));
   if (stepById(ctx.task, id)) { process.stderr.write(`timc step add: ${id} already exists\n`); return 1; }
   const entry = {
     id,
     goal,
+    delivers: delivers || null,
+    kind,
     depends_on: asArray(args.flags.depends),
     owner: String(args.flags.owner ?? 'implementor.backend'),
     touches,
@@ -73,7 +85,13 @@ async function add({ args, ctx }) {
   appendEvent(ctx.P, { type: 'STEP_ADDED', task: ctx.task.id, step: id, payload: { goal, touches, validate } });
   commitState(ctx, `timc: ${ctx.task.id} ${id} added`);
   if (args.flags.json) { process.stdout.write(`${JSON.stringify(entry, null, 2)}\n`); return 0; }
-  process.stdout.write(`${c.green('✓')} ${id} qo'shildi / added — ${goal}\n  validate: ${validate.join(' · ')}\n`);
+  const notes = planAdvisories({ steps: [entry] });
+  process.stdout.write([
+    `${c.green('✓')} ${id} qo'shildi / added ${c.dim(`(${kind})`)} — ${goal}`,
+    delivers ? `  delivers: ${delivers}` : '',
+    `  validate: ${validate.join(' · ')}`,
+    ...notes.map((n) => `  ${c.yellow('!')} ${n}`),
+  ].filter(Boolean).join('\n') + '\n');
   return 0;
 }
 

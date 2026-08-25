@@ -225,11 +225,21 @@ export function interviewMd(task) {
 
 > ${task.title}
 
+The interview is a **design tree worked in rounds**. The **frontier** is every
+decision whose prerequisites are settled — ask that whole set in one round, each
+question with your recommended answer, then wait. Answers reshape the tree and
+push the frontier outward.
+
+Finding **facts** is the agent's job: look them up, never ask the user something
+the codebase can answer. **Decisions** are the user's. The interview closes when
+the frontier is empty (\`timc frontier\`), not when it feels like enough.
+
+Questions live in \`task.yaml\` (\`timc ask\` / \`timc answer\`); this file records the
+understanding they produced.
+
 ## Codebase findings
 
-_What was inspected before asking anything._
-
-## Questions asked
+_Facts established by looking, not by asking._
 
 ## Confirmed facts
 
@@ -258,6 +268,11 @@ public_api_change: false
 migration_required: false
 security_relevant: false
 assumptions: []
+seams:
+  - id: SEAM-1
+    where: TODO            # the boundary the tests attach to
+    kind: existing         # existing | new  (a new seam needs approved_by)
+    tests: TODO            # prior art: similar tests already in the codebase
 acceptance_criteria:
   - id: AC-1
     text: TODO
@@ -265,25 +280,47 @@ acceptance_criteria:
 
 # Specification — ${task.id}
 
-## Problem
+_Synthesis, not interview: this is written from what the interview already
+settled. No file paths, no code snippets — they go stale within a week. The one
+exception is a snippet that encodes a decision more precisely than prose can
+(a state machine, a schema, a type shape); trim it to the decision._
 
-## Goal
+## Problem statement
 
-## Scope
+_From the user's perspective._
 
-## Non-goals
+## Solution
 
-## Actors
+_From the user's perspective._
 
-## Functional requirements
+## User stories
 
-## Business rules
+_Long and specific. "As an <actor>, I want <feature>, so that <benefit>."_
 
-## Edge cases
+1. As a …, I want …, so that …
+
+## Implementation decisions
+
+_Modules built or changed, interfaces, schema changes, API contracts,
+architectural decisions, clarifications from the developer._
+
+## Seams and testing decisions
+
+_Where does this get tested? Prefer an existing seam; use the highest seam you
+can; the fewer seams the better — one is ideal. A new seam needs the user's
+approval. Only external behaviour is tested, never implementation details._
+
+| seam | where | existing/new | prior art |
+|---|---|---|---|
+| SEAM-1 | TODO | existing | TODO |
 
 ## Acceptance criteria
 
 - **AC-1** — TODO
+
+## Out of scope
+
+## Business rules · Edge cases
 
 ## Security · Performance · Compatibility · Migration
 
@@ -297,9 +334,30 @@ export function planMd(task) {
 Steps live in \`task.yaml\` (the machine-readable truth). This file explains the
 shape of the plan for humans: ordering, risks, and why it is cut this way.
 
-## Approach
+## How the work is cut
 
-## Ordering / dependencies
+Each step is a **tracer bullet**: a narrow but *complete* path through every
+layer (schema → API → UI → tests), demoable on its own, sized to fit one fresh
+context window. Layer-shaped steps ("the domain model", "the API") are the
+anti-pattern — nothing can validate them and nothing can demo them.
+
+Prefactoring comes first: make the change easy, then make the easy change.
+
+**Wide refactors are the exception.** One mechanical change whose blast radius
+covers the codebase cannot land green as a slice. Sequence it instead:
+
+\`\`\`
+expand   → add the new form beside the old, nothing breaks
+migrate* → move call sites in batches (per package/directory), CI green each time
+contract → delete the old form once no caller remains
+\`\`\`
+
+Use \`--kind expand|migrate|contract\`; TIMC enforces the ordering.
+
+## Slices
+
+| step | delivers (end-to-end behaviour) | blocked by |
+|---|---|---|
 
 ## Risks
 
