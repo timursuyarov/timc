@@ -68,7 +68,7 @@ test('editing outside the step reports drift without blocking', async (t) => {
 
   const res = timc(repo, ['guard', 'write', '--hook'], { stdin: writeHookPayload(path.join(repo, 'package.json'), { cwd: repo }) });
   assert.equal(decision(res), null, 'drift informs, it does not block');
-  assert.match(res.json.additionalContext, /scope drift/i);
+  assert.match(res.json.hookSpecificOutput.additionalContext, /scope drift/i);
 });
 
 test('destructive commands are denied', async (t) => {

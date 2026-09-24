@@ -3,6 +3,7 @@ import { PHASES, PHASE_GATE, canAdvance, next as computeNext, phasePlan, planAdv
 import { nowIso } from '../io.js';
 import { c } from '../render.js';
 import { createCheckpoint } from './checkpoint.js';
+import { requireHuman } from '../actor.js';
 
 export async function phase({ args, ctx }) {
   const sub = args.positional[0] ?? 'show';
@@ -30,6 +31,12 @@ async function show({ args, ctx }) {
 async function advance({ args, ctx }) {
   const adv = canAdvance(ctx, ctx.task);
   if (!adv.to) { process.stdout.write(`${ctx.task.id} is already in its final phase (${ctx.task.phase})\n`); return 0; }
+  // A suspended task does not move, whatever its gate says.
+  const s = ctx.task.suspend;
+  if (s && !adv.missing.some((m) => m.startsWith('task is suspended'))) {
+    adv.missing.unshift(`task is suspended (${s.kind}${s.reason ? `: ${s.reason}` : ''}) — \`timc next\` says how to resolve it`);
+    adv.ok = false;
+  }
   if (!adv.ok) {
     const L = [c.red(`× ${ctx.task.phase} → ${adv.to} bloklandi / blocked`)];
     for (const m of adv.missing) L.push(`  ${c.yellow('·')} ${m}`);
@@ -52,10 +59,18 @@ async function set({ args, ctx, to }) {
   }
   const reason = String(args.flags.reason ?? '').trim();
   if (!reason) { process.stderr.write('timc phase set: --reason "<why the gate does not apply>" is required\n'); return 1; }
-  return move({ args, ctx, to: target, forced: true, reason });
+  // Skipping a gate is the user's decision, never the agent's own shortcut.
+  const who = await requireHuman(ctx, args, {
+    action: `Forcing ${ctx.task.phase} → ${target}`,
+    latest: true,
+    claim: `Skip the gates and move ${ctx.task.id} from ${ctx.task.phase} to ${target}, because: ${reason}`,
+  });
+  if (who.ok === false) { process.stderr.write(`timc phase set: ${who.why}\n`); return 2; }
+  const quote = who.quote ? ` [quote events#seq=${who.quote.seq}]` : '';
+  return move({ args, ctx, to: target, forced: true, reason: `${reason}${quote}`, forcedBy: who.by });
 }
 
-function move({ args, ctx, to, forced, reason = null }) {
+function move({ args, ctx, to, forced, reason = null, forcedBy = null }) {
   const from = ctx.task.phase;
   const gateKey = PHASE_GATE[from];
   ctx.task.gates = ctx.task.gates ?? {};
@@ -63,7 +78,7 @@ function move({ args, ctx, to, forced, reason = null }) {
     ctx.task.gates[gateKey] = {
       status: forced ? 'forced' : 'passed',
       at: nowIso(),
-      approved_by: args.flags['by-user'] ? 'user' : undefined,
+      approved_by: forcedBy ?? undefined,
       reason: reason ?? undefined,
     };
   }
@@ -87,7 +102,7 @@ function move({ args, ctx, to, forced, reason = null }) {
     reason: reason ?? undefined,
   }];
   ctx.task = saveTask(ctx.P, ctx.task);
-  appendEvent(ctx.P, { type: 'PHASE_COMPLETED', task: ctx.task.id, payload: { from, to, forced, reason } });
+  appendEvent(ctx.P, { type: 'PHASE_COMPLETED', task: ctx.task.id, actor: forced ? 'human' : undefined, payload: { from, to, forced, reason } });
   appendEvent(ctx.P, { type: 'PHASE_STARTED', task: ctx.task.id, payload: { phase: to } });
   createCheckpoint(ctx, { reason: 'PHASE_STARTED' });
   commitState(ctx, `timc: ${ctx.task.id} ${from} → ${to}`);

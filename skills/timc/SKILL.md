@@ -29,8 +29,9 @@ essential is missing, that is a bug in the plan — say so.
 
 ## The rules you cannot talk your way around
 
-1. **State changes only through the CLI.** Never edit `.timc/runtime/**` or
-   `task.yaml`. Both are denied by a hook. Use `timc step ...`, `timc phase ...`.
+1. **State changes only through the CLI.** Never edit `.timc/runtime/**`,
+   `task.yaml`, `decisions.md` or `.timc/config/**` — not with Edit/Write and not
+   through Bash (`>`, `tee`, `sed -i`, `cp`… are parsed and denied the same way).
 2. **Evidence or it did not happen.** Run every validation command as
    `timc run -- <cmd>`. `timc step complete` refuses to close a step whose
    declared `validate[]` commands have no passing recorded run. Do not attempt
@@ -41,11 +42,36 @@ essential is missing, that is a bug in the plan — say so.
 4. **One step at a time, inside its `touches[]`.** Editing outside is recorded as
    scope drift. If the file really belongs to the step, update the plan first.
 5. **Gates are not negotiable.** `timc phase advance` prints exactly what is
-   missing. Satisfy it, or record why it does not apply
-   (`timc phase set <P> --force --reason "..."`) — never work around it silently.
+   missing. Satisfy it. Skipping a gate (`timc phase set <P> --force`) is the
+   **user's** decision, never your shortcut — see *User decisions* below.
 6. **Never invent a user decision.** `timc decide ... --by user` requires
    `--evidence Q-00N` (an answered question) or `events#seq=N` (an
    `ANSWER_RECEIVED` event) and refuses anything else. Ask with `timc ask`.
+7. **A suspended task does not move.** While it is BLOCKED, PAUSED or awaiting
+   answers, `step start`, `step complete` and `phase advance` refuse. Resolve the
+   suspension (`timc next` says how); an ABANDONED task stays abandoned.
+
+## User decisions: `--quote`
+
+Some actions belong to the user: answering a question, approving the plan or a
+new seam, `phase set --force`, lowering a track (`new --track`, `retrack`),
+`step reset`, and `verify --waive`. TIMC tells your shell from the user's
+(Claude Code sets `CLAUDECODE=1` for your Bash tool — never touch it).
+
+Every message the user types is recorded by the UserPromptSubmit hook, and the
+hook tells you its id: *"this message is recorded as events#seq=41"*. When that
+message carries the decision, pass it:
+
+```bash
+timc answer Q-001 "yes, capped at the captured amount" --quote events#seq=41
+timc approve plan --quote events#seq=57
+```
+
+- An answer must quote a message sent **after** the question was asked; the
+  other actions must quote the user's **latest** message.
+- Quote what the user actually said. If they hesitated ("hmm, not sure"), ask
+  again — when Jev is enabled, a quote that does not read as approval is refused.
+- The user can always run these commands in their own terminal instead.
 
 ## Interview: a design tree, worked in rounds
 
@@ -68,7 +94,7 @@ timc ask "Can one payment have several partial refunds?" \
 timc ask "How is a partial refund split across accruals?" \
          --recommend "pro rata on the remaining balance" --depends Q-001
 timc frontier                       # what is askable right now
-timc answer Q-001 "yes, capped"     # recorded verbatim, linked to an event
+timc answer Q-001 "yes, capped" --quote events#seq=N   # the user's reply, verbatim
 ```
 
 `timc ask` refuses a question with no recommendation: an interview that hands the
@@ -81,7 +107,10 @@ Two things people skip and TIMC checks:
 
 - **Seams.** Name where this gets tested, in `spec.md` front matter. Prefer an
   existing seam, use the highest one you can, and the fewer the better — one is
-  ideal. A **new** seam needs the user's approval (`approved_by`).
+  ideal. A **new** seam needs the user's approval: `timc approve seam SEAM-2`
+  (writing `approved_by` into spec.md counts for nothing).
+- **No placeholders.** An acceptance criterion or seam still reading `TODO`
+  does not pass the gate.
 - **No file paths, no code snippets.** They go stale in a week. The exception is
   a snippet that encodes a decision more precisely than prose can (state machine,
   schema, type shape) — trimmed to the decision.
@@ -96,6 +125,10 @@ layer, demoable on its own, sized for one fresh context window.
 > Nothing validates them and nothing demos them — TIMC flags them.
 
 Prefactor first: make the change easy, then make the easy change.
+
+Fix a plan with `timc step edit <ID> --depends … --touches …` or
+`timc step remove <ID>` (only steps that have not started). Then show the user the
+plan and wait: `timc approve plan` is theirs, and any later edit voids it.
 
 **Wide refactors are the exception.** One mechanical change whose blast radius
 covers the codebase cannot land green as a slice. Sequence it and TIMC enforces
@@ -120,7 +153,15 @@ timc step start IMP-001
 # ... implement (subagent on non-trivial tracks) ...
 timc run -- dotnet test --filter Refund
 timc step complete IMP-001
+# VERIFYING: link each acceptance criterion to the evidence that proves it
+timc verify AC-1                   # picks green evidence from the done step covering AC-1
 ```
+
+`verify` accepts only passing evidence from a finished step that declares
+`--acceptance AC-1`. A criterion whose steps were skipped cannot borrow another
+step's run — the user waives it (`timc verify AC-2 --waive --reason "..."`).
+After three failed attempts `step start` refuses; show the user the failures,
+and they reset it (`timc step reset IMP-001`).
 
 Trivial fix, minimum ceremony (stays on the current branch):
 
@@ -177,6 +218,16 @@ instead of stalling invisibly.
 - `timc checkpoint` — snapshot state + dirty worktree (no branch commit)
 - `timc doctor --rebuild` — rebuild runtime state from durable truth
 - `timc ask | answer | block | unblock | pause | abandon`
+- `timc retrack <track> --reason "..."` — raise the track when the task turns out riskier
+
+## Jev (optional)
+
+If `.timc/config/workflow.yaml` enables `jev`, TIMC asks TypeSafe's Jev
+(native API or OpenRouter) a few calibrated yes/no questions: does the quoted
+message really approve this, is this title riskier than its keywords say, is
+this step a vertical slice, does this command exercise the criterion. Jev only
+ever makes TIMC stricter. Treat its warnings as real, and never touch
+`OPENROUTER_API_KEY` / `TYPESAFE_API_KEY` or the config.
 - `.timc/AGENTS.md` — the same contract, for any other agent
 
 The interview, spec and slicing mechanics above are adapted from

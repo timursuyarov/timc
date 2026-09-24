@@ -128,8 +128,18 @@ export function isClean(dir) {
 
 /** Commits in the code repo carrying a given TIMC trailer. */
 export function commitsWithTrailer(cwd, key, value) {
-  const out = gitSafe(cwd, ['log', '--format=%H', '--fixed-strings', `--grep=${key}: ${value}`], '') ?? '';
-  return out.split('\n').filter(Boolean);
+  // Parse real trailers: a "TIMC-Task: X" line in the middle of a message body is not one.
+  const fmt = `%H%x09%(trailers:key=${key},valueonly,separator=%x2C)`;
+  const out = gitSafe(cwd, ['log', `--format=${fmt}`], '') ?? '';
+  return out.split('\n')
+    .map((l) => l.split('\t'))
+    .filter(([sha, vals]) => sha && String(vals ?? '').split(',').map((v) => v.trim()).includes(value))
+    .map(([sha]) => sha);
+}
+
+/** Changed paths (porcelain), repo-relative. */
+export function dirtyPaths(dir) {
+  return porcelain(dir).split('\n').filter(Boolean).map((l) => l.slice(3).replace(/^"|"$/g, '').split(' -> ').pop());
 }
 
 export function checkoutNewBranch(cwd, name) {

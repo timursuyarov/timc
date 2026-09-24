@@ -11,13 +11,13 @@
         ]
       }
     ],
-    "PostCompact": [
+    "UserPromptSubmit": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/src/cli.js\" brief --auto --hook",
-            "timeout": 20
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/src/cli.js\" prompt --hook",
+            "timeout": 10
           }
         ]
       }

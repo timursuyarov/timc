@@ -7,12 +7,20 @@ import { appendNdjson, ensureDir, nowIso, readNdjson, sha256, writeJson } from '
  * the model, which is denied write access to .timc/runtime/**.
  */
 
-/** Shell operators that can launder a non-zero exit code into a zero one. */
-const LAUNDERING = /(\|\||&&|[|;&><])/;
+/**
+ * Shell operators that can launder a non-zero exit code into a zero one. A
+ * newline is a command separator too: `npm test\ntrue` exits 0.
+ */
+const LAUNDERING = /(\|\||&&|[|;&><\n`]|\$\()/;
 
-/** @param {string} cmd */
+/**
+ * Collapse spaces and tabs but keep newlines — they separate commands, so
+ * flattening them would turn `npm test\ntrue` into the harmless-looking
+ * `npm test true`.
+ * @param {string} cmd
+ */
 export function normalizeCommand(cmd) {
-  let c = String(cmd ?? '').replace(/\s+/g, ' ').trim();
+  let c = String(cmd ?? '').replace(/\r\n?/g, '\n').replace(/[ \t]+/g, ' ').replace(/ *\n */g, '\n').trim();
   // Strip wrapping quotes a caller may have added.
   while ((c.startsWith('"') && c.endsWith('"')) || (c.startsWith("'") && c.endsWith("'"))) {
     c = c.slice(1, -1).trim();
@@ -64,7 +72,7 @@ export function recordEvidence(P, rec) {
     id,
     task: rec.task ?? null,
     step: rec.step ?? null,
-    command: String(rec.command ?? '').replace(/\s+/g, ' ').trim(),
+    command: String(rec.command ?? '').replace(/\r\n?/g, '\n').replace(/[ \t]+/g, ' ').trim(),
     cwd: rec.cwd ?? null,
     source: rec.source,
     toolUseId: rec.toolUseId ?? null,

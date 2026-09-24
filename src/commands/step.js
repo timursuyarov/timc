@@ -7,6 +7,8 @@ import {
 import { c } from '../render.js';
 import { createCheckpoint } from './checkpoint.js';
 import * as G from '../git.js';
+import { requireHuman } from '../actor.js';
+import { sliceAdvice } from '../jev.js';
 
 const asArray = (v) => (v === undefined || v === null ? [] : (Array.isArray(v) ? v : [v]))
   .flatMap((x) => String(x).split(',').map((s) => s.trim()).filter(Boolean));
@@ -28,8 +30,11 @@ export async function step({ args, ctx }) {
     case 'complete': return complete({ args, ctx, id: rest[0] });
     case 'fail': return fail({ args, ctx, id: rest[0] });
     case 'skip': return skip({ args, ctx, id: rest[0] });
+    case 'edit': return edit({ args, ctx, id: rest[0] });
+    case 'remove': return remove({ args, ctx, id: rest[0] });
+    case 'reset': return reset({ args, ctx, id: rest[0] });
     default:
-      process.stderr.write('timc step: add | list | start <ID> | complete <ID> | fail <ID> | skip <ID>\n');
+      process.stderr.write('timc step: add | list | start <ID> | complete <ID> | fail <ID> | skip <ID> | edit <ID> | remove <ID> | reset <ID>\n');
       return 1;
   }
 }
@@ -86,6 +91,10 @@ async function add({ args, ctx }) {
   commitState(ctx, `timc: ${ctx.task.id} ${id} added`);
   if (args.flags.json) { process.stdout.write(`${JSON.stringify(entry, null, 2)}\n`); return 0; }
   const notes = planAdvisories({ steps: [entry] });
+  if (kind === 'slice' && !notes.length) {
+    const jevNote = await sliceAdvice(ctx, entry);
+    if (jevNote) notes.push(jevNote);
+  }
   process.stdout.write([
     `${c.green('✓')} ${id} qo'shildi / added ${c.dim(`(${kind})`)} — ${goal}`,
     delivers ? `  delivers: ${delivers}` : '',
@@ -115,6 +124,7 @@ async function start({ args, ctx, id }) {
     process.stderr.write(`timc step start: task is in ${ctx.task.phase}, not BUILDING — run \`timc phase advance\` first\n`);
     return 2;
   }
+  if (suspended(ctx, 'step start')) return 2;
   if (CLOSED_STEP.has(target.status)) { process.stderr.write(`timc step start: ${target.id} is already ${target.status}\n`); return 1; }
   if (!depsSatisfied(ctx.task, target)) {
     const open = (target.depends_on ?? []).filter((d) => !CLOSED_STEP.has(stepById(ctx.task, d)?.status));
@@ -124,7 +134,8 @@ async function start({ args, ctx, id }) {
   const retries = target.retries ?? 0;
   const limit = Number(ctx.config?.workflow?.limits?.step_retries ?? 3);
   if (retries >= limit) {
-    process.stderr.write(`timc step start: ${target.id} has already been retried ${retries} times (limit ${limit}). Use \`timc ask\` to bring a human in.\n`);
+    process.stderr.write(`timc step start: ${target.id} has already been retried ${retries} times (limit ${limit}). `
+      + `Bring a human in: after they have looked at it, they run \`timc step reset ${target.id}\`.\n`);
     return 2;
   }
   target.status = 'in_progress';
@@ -154,6 +165,7 @@ async function complete({ args, ctx, id }) {
     process.stderr.write(`timc step complete: ${target.id} is ${target.status} — start it first\n`);
     return 2;
   }
+  if (suspended(ctx, 'step complete')) return 2;
 
   // The gate that makes invariant 13 real: no green status without evidence.
   const v = verifyStep(ctx.P, ctx.task, target);
@@ -239,6 +251,99 @@ async function skip({ args, ctx, id }) {
   appendEvent(ctx.P, { type: 'STEP_SKIPPED', task: ctx.task.id, step: target.id, payload: { reason } });
   commitState(ctx, `timc: ${ctx.task.id} ${target.id} skipped`);
   process.stdout.write(`${c.dim('–')} ${target.id} skipped — ${reason}\n`);
+  return 0;
+}
+
+/** A suspended task does not move: say why and what resolves it. */
+function suspended(ctx, what) {
+  const s = ctx.task.suspend;
+  if (!s) return false;
+  const how = {
+    AWAITING_USER: 'answer the open questions (`timc frontier`)',
+    BLOCKED: 'the blocker is resolved with `timc unblock`',
+    PAUSED: '`timc resume`',
+    PAUSED_LIMIT: '`timc resume`',
+    RECOVERY_REQUIRED: '`timc doctor`',
+    ABANDONED: 'nothing — the task was abandoned; start a new one',
+  }[s.kind] ?? '`timc resume`';
+  process.stderr.write(`timc ${what}: ${ctx.task.id} is suspended (${s.kind}${s.reason ? `: ${s.reason}` : ''}) — ${how}\n`);
+  return true;
+}
+
+const EDITABLE = new Set(['pending', 'ready']);
+
+/** `timc step edit <ID> [--goal] [--delivers] [--touches] [--validate] [--depends] [--acceptance] [--kind]` */
+async function edit({ args, ctx, id }) {
+  const target = id ? stepById(ctx.task, id) : null;
+  if (!target) { process.stderr.write(`timc step edit: step ${id ?? '<ID>'} not found\n`); return 1; }
+  if (!EDITABLE.has(target.status)) {
+    process.stderr.write(`timc step edit: ${target.id} is ${target.status} — only a step that has not started can be edited\n`);
+    return 2;
+  }
+  const changes = {};
+  if (args.flags.goal !== undefined) changes.goal = String(args.flags.goal).trim();
+  if (args.flags.delivers !== undefined) changes.delivers = String(args.flags.delivers).trim() || null;
+  if (args.flags.touches !== undefined) changes.touches = asArray(args.flags.touches);
+  if (args.flags.validate !== undefined) changes.validate = asCommands(args.flags.validate);
+  if (args.flags.depends !== undefined) changes.depends_on = args.flags.depends === true ? [] : asArray(args.flags.depends);
+  if (args.flags.acceptance !== undefined) changes.acceptance = args.flags.acceptance === true ? null : String(args.flags.acceptance);
+  if (args.flags.kind !== undefined) {
+    if (!STEP_KINDS.includes(String(args.flags.kind))) { process.stderr.write(`timc step edit: unknown --kind (${STEP_KINDS.join(' | ')})\n`); return 1; }
+    changes.kind = String(args.flags.kind);
+  }
+  if (!Object.keys(changes).length) { process.stderr.write('timc step edit: nothing to change\n'); return 1; }
+  for (const d of changes.depends_on ?? []) {
+    if (d === target.id || !stepById(ctx.task, d)) { process.stderr.write(`timc step edit: unknown or self dependency ${d}\n`); return 1; }
+  }
+  const next = { ...target, ...changes };
+  if (!next.touches?.length || !next.validate?.length) { process.stderr.write('timc step edit: touches and validate cannot be empty\n'); return 1; }
+  if (next.kind === 'slice' && !next.delivers) { process.stderr.write('timc step edit: a slice needs --delivers\n'); return 1; }
+  Object.assign(target, changes);
+  ctx.task = saveTask(ctx.P, ctx.task);
+  appendEvent(ctx.P, { type: 'STEP_EDITED', task: ctx.task.id, step: target.id, payload: { changes } });
+  commitState(ctx, `timc: ${ctx.task.id} ${target.id} edited`);
+  process.stdout.write(`${c.green('✓')} ${target.id} o'zgartirildi / edited — ${Object.keys(changes).join(', ')}\n`
+    + (ctx.task.approvals?.plan ? c.dim('  plan tasdig\'i endi eskirdi / plan approval is now stale\n') : ''));
+  return 0;
+}
+
+/** `timc step remove <ID>` — only a step that never started and nothing depends on. */
+async function remove({ ctx, id }) {
+  const target = id ? stepById(ctx.task, id) : null;
+  if (!target) { process.stderr.write(`timc step remove: step ${id ?? '<ID>'} not found\n`); return 1; }
+  if (!EDITABLE.has(target.status) || (target.evidence ?? []).length) {
+    process.stderr.write(`timc step remove: ${target.id} is ${target.status} — work that started stays in the record; use \`timc step skip\`\n`);
+    return 2;
+  }
+  const dependents = stepsOf(ctx.task).filter((s) => (s.depends_on ?? []).includes(target.id));
+  if (dependents.length) {
+    process.stderr.write(`timc step remove: ${dependents.map((s) => s.id).join(', ')} depend on ${target.id} — edit their --depends first\n`);
+    return 2;
+  }
+  ctx.task.steps = stepsOf(ctx.task).filter((s) => s.id !== target.id);
+  ctx.task = saveTask(ctx.P, ctx.task);
+  appendEvent(ctx.P, { type: 'STEP_REMOVED', task: ctx.task.id, step: target.id, payload: { goal: target.goal } });
+  commitState(ctx, `timc: ${ctx.task.id} ${target.id} removed`);
+  process.stdout.write(`${c.dim('–')} ${target.id} olib tashlandi / removed — ${target.goal}\n`);
+  return 0;
+}
+
+/** `timc step reset <ID>` — the user clears the retry counter after looking at the failures. */
+async function reset({ args, ctx, id }) {
+  const target = id ? stepById(ctx.task, id) : null;
+  if (!target) { process.stderr.write(`timc step reset: step ${id ?? '<ID>'} not found\n`); return 1; }
+  const who = await requireHuman(ctx, args, {
+    action: `Resetting ${target.id}'s retry limit`,
+    latest: true,
+    claim: `Let the agent retry step ${target.id} (${target.goal}) again after ${target.retries ?? 0} failed attempts`,
+  });
+  if (who.ok === false) { process.stderr.write(`timc step reset: ${who.why}\n`); return 2; }
+  const was = target.retries ?? 0;
+  target.retries = 0;
+  ctx.task = saveTask(ctx.P, ctx.task);
+  appendEvent(ctx.P, { type: 'STEP_RESET', task: ctx.task.id, step: target.id, actor: 'human', payload: { retries: was, quote: who.quote } });
+  commitState(ctx, `timc: ${ctx.task.id} ${target.id} retries reset`);
+  process.stdout.write(`${c.green('✓')} ${target.id} retries ${was} → 0\n  ${c.cyan(`timc step start ${target.id}`)}\n`);
   return 0;
 }
 

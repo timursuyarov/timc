@@ -2,7 +2,7 @@ import path from 'node:path';
 import { readText, writeAtomic } from '../io.js';
 import { appendEvent, commitState } from '../store.js';
 import { allEvidence } from '../evidence.js';
-import { PHASE_GATE, phasePlan, questionsOf, readSpecMeta, stepsOf } from '../machine.js';
+import { PHASE_GATE, phasePlan, questionsOf, readSpecMeta, stepsOf, verificationProblem } from '../machine.js';
 import * as G from '../git.js';
 import { c } from '../render.js';
 
@@ -149,14 +149,22 @@ export function renderFinal(ctx) {
   if (acs.length) {
     L.push('## Qabul mezonlari / Acceptance criteria');
     L.push('');
-    for (const ac of acs) L.push(`- ${ac.verified_by ? '[x]' : '[ ]'} **${ac.id}** — ${ac.text}${ac.verified_by ? ` _(${ac.verified_by})_` : ''}`);
+    for (const ac of acs) {
+      const v = t.verifications?.[ac.id];
+      const ok = !verificationProblem(ctx, t, ac.id);
+      const note = v?.waived ? ` _(waived by ${v.by}: ${v.reason})_` : v?.evidence ? ` _(${v.step}: ${v.evidence})_` : '';
+      L.push(`- ${ok ? (v?.waived ? '[~]' : '[x]') : '[ ]'} **${ac.id}** — ${ac.text}${note}`);
+    }
     L.push('');
   }
   const seams = Array.isArray(spec.seams) ? spec.seams : [];
   if (seams.length) {
     L.push('## Seams');
     L.push('');
-    for (const s of seams) L.push(`- **${s.id}** ${s.where} — ${s.kind}${s.approved_by ? ` (approved by ${s.approved_by})` : ''}`);
+    for (const s of seams) {
+      const a = t.approvals?.seams?.[s.id];
+      L.push(`- **${s.id}** ${s.where} — ${s.kind}${a ? ` (approved by ${a.by}${a.quote ? `, events#seq=${a.quote}` : ''})` : ''}`);
+    }
     L.push('');
   }
 

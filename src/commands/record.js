@@ -25,9 +25,10 @@ export async function record({ args, ctx }) {
   if (/^(cd|ls|dir|cat|type|echo|pwd|git status|git diff|git log)\b/.test(trimmed)) return 0;
 
   const failed = Boolean(args.flags.failed) || payload?.hook_event_name === 'PostToolUseFailure';
-  const output = typeof payload?.tool_output === 'string'
-    ? payload.tool_output
-    : JSON.stringify(payload?.tool_output ?? '');
+  const raw = payload?.tool_output ?? payload?.tool_response ?? payload?.error ?? '';
+  const output = typeof raw === 'string'
+    ? raw
+    : (raw?.text ?? raw?.message ?? [raw?.stdout, raw?.stderr].filter(Boolean).join('\n')) || JSON.stringify(raw);
 
   recordEvidence(ctx.P, {
     task: ctx.task?.id ?? null,

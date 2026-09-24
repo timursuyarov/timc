@@ -32,7 +32,7 @@ export async function init({ args, roots }) {
 
   seed(P.version, `${PROTOCOL_VERSION}\n`, created, skipped);
   seed(P.agentsMd, T.AGENTS_MD, created, skipped);
-  seed(P.gitignore, 'runtime/\n', created, skipped);
+  seed(P.gitignore, T.TIMC_GITIGNORE, created, skipped);
   seed(P.project, T.projectYaml(detected, name), created, skipped);
   seed(P.workflow, T.workflowYaml(), created, skipped);
   seed(P.agents, T.agentsYaml(), created, skipped);

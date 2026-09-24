@@ -1,7 +1,9 @@
 import path from 'node:path';
 import { ensureDir, slugify, writeAtomic, writeYaml } from '../io.js';
 import { appendEvent, commitState, listTasks, loadTask, nextTaskId } from '../store.js';
-import { classify, TRACKS } from '../classify.js';
+import { classify, retrackAllowed, TRACKS } from '../classify.js';
+import { actorName, requireHuman } from '../actor.js';
+import { suggestTrack } from '../jev.js';
 import * as T from '../templates.js';
 import * as G from '../git.js';
 import { c } from '../render.js';
@@ -19,6 +21,13 @@ export async function newTask({ args, ctx }) {
   }
   const intent = args.flags.intent ? String(args.flags.intent) : title;
   const auto = classify(`${title} ${intent}`);
+  // Jev may raise the keyword track when it is confident; it can never lower it.
+  const jev = await suggestTrack(ctx, { title, intent, auto });
+  if (jev.track) {
+    auto.keyword_track = auto.track;
+    auto.track = jev.track;
+    auto.signals = [...auto.signals, `jev:${jev.track}`];
+  }
   let track = auto.track;
   if (args.flags.track) {
     const wanted = String(args.flags.track);
@@ -27,6 +36,25 @@ export async function newTask({ args, ctx }) {
       return 1;
     }
     track = wanted;
+  }
+  // Lowering the classified track removes gates, so it is the user's call.
+  let override = null;
+  if (track !== auto.track) {
+    const lowering = TRACKS.indexOf(track) < TRACKS.indexOf(auto.track);
+    const who = lowering
+      ? await requireHuman(ctx, args, {
+        action: `Lowering the track from ${auto.track} to ${track}`,
+        latest: true,
+        claim: `Treat the task "${title}" as ${track} instead of ${auto.track} (fewer gates)`,
+      })
+      : { ok: true, by: actorName() === 'human' ? 'user' : 'agent:orchestrator', quote: null };
+    if (who.ok === false) {
+      process.stderr.write(`timc new: this task classifies as ${auto.track} (${auto.signals.join(', ')}). ${who.why}\n`);
+      return 2;
+    }
+    const rule = retrackAllowed(auto.track, track, { byUser: who.by === 'user' });
+    if (!rule.allowed) { process.stderr.write(`timc new: ${rule.reason}\n`); return 2; }
+    override = who;
   }
 
   const id = nextTaskId(ctx.P);
@@ -58,7 +86,7 @@ export async function newTask({ args, ctx }) {
     title,
     intent,
     track,
-    classification: { score: auto.score, signals: auto.signals, auto_track: auto.track },
+    classification: { score: auto.score, signals: auto.signals, auto_track: auto.track, keyword_track: auto.keyword_track ?? auto.track, jev: jev.why },
     branch,
   });
   writeYaml(path.join(dir, 'task.yaml'), doc);
@@ -85,9 +113,14 @@ export async function newTask({ args, ctx }) {
   ctx.state.currentStep = null;
   ctx.state.lastCompletedStep = null;
 
-  appendEvent(ctx.P, { type: 'TASK_CREATED', task: id, actor: 'human', payload: { title, track, score: auto.score, signals: auto.signals, branch } });
-  if (track !== auto.track) {
-    appendEvent(ctx.P, { type: 'TRACK_ASSIGNED', task: id, actor: 'human', payload: { from: auto.track, to: track, by: 'user' } });
+  appendEvent(ctx.P, { type: 'TASK_CREATED', task: id, actor: actorName(), payload: { title, track, score: auto.score, signals: auto.signals, branch } });
+  if (override) {
+    appendEvent(ctx.P, {
+      type: 'TRACK_ASSIGNED',
+      task: id,
+      actor: override.by === 'user' ? 'human' : 'orchestrator',
+      payload: { from: auto.track, to: track, by: override.by, quote: override.quote },
+    });
   }
   commitState(ctx, `timc: ${id} created (${track})`);
   updateIndex(ctx);

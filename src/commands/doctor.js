@@ -4,6 +4,8 @@ import { PHASES, stepsOf, STEP_STATUSES } from '../machine.js';
 import { reconcile } from './resume.js';
 import { c } from '../render.js';
 import * as G from '../git.js';
+import { readText, writeAtomic } from '../io.js';
+import { TIMC_GITIGNORE } from '../templates.js';
 
 /**
  * `timc doctor [--rebuild]`
@@ -40,8 +42,11 @@ export async function doctor({ args, ctx }) {
     }
   }
 
-  const r = reconcile(ctx);
-  for (const f of r.findings.filter((x) => x.level !== 'info')) problems.push(f.text);
+  // V0 ignored all of runtime/, so the journal never reached git.
+  if (readText(ctx.P.gitignore, '').trim() === 'runtime/') {
+    writeAtomic(ctx.P.gitignore, TIMC_GITIGNORE);
+    fixed.push('.timc/.gitignore: events and evidence are now committed (was: runtime/ ignored)');
+  }
 
   if (args.flags.rebuild) {
     const state = emptyState();
@@ -68,6 +73,10 @@ export async function doctor({ args, ctx }) {
     fixed.push('runtime/state.json rebuilt from task.yaml + event log + git');
     appendEvent(ctx.P, { type: 'RECOVERY_RESOLVED', task: state.activeTask, payload: { rebuilt: true } });
   }
+
+  // Reconcile after any rebuild, so a problem the rebuild just fixed is not reported.
+  const r = reconcile(ctx);
+  for (const f of r.findings.filter((x) => x.level !== 'info')) problems.push(f.text);
 
   // .timc must never be left dirty: uncommitted process state is lost state.
   if (!G.isClean(ctx.timcDir)) {

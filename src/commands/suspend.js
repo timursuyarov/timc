@@ -4,6 +4,7 @@ import { frontier, next as computeNext } from '../machine.js';
 import { createCheckpoint } from './checkpoint.js';
 import { readStdinJson } from '../cli.js';
 import { c } from '../render.js';
+import { actorName, requireHuman } from '../actor.js';
 
 /** Suspension is orthogonal to the phase: the phase never changes here. */
 function setSuspend(ctx, kind, reason, extra = {}) {
@@ -53,6 +54,7 @@ export async function ask({ args, ctx }) {
     answer: null,
   }];
   const ev = appendEvent(ctx.P, { type: 'QUESTION_ASKED', task: ctx.task.id, payload: { id, question, recommendation, depends, round } });
+  ctx.task.open_questions[ctx.task.open_questions.length - 1].asked_seq = ev.seq;
 
   const askable = frontier(ctx.task).length;
   setSuspend(ctx, 'AWAITING_USER', `${askable} question(s) waiting`, {
@@ -86,10 +88,25 @@ export async function answer({ args, ctx }) {
   if (!id || !text) { process.stderr.write('timc answer: timc answer <Q-ID> "<answer>"\n'); return 1; }
   const q = (ctx.task.open_questions ?? []).find((x) => x.id === id);
   if (!q) { process.stderr.write(`timc answer: ${id} not found\n`); return 1; }
+  if (q.answer) { process.stderr.write(`timc answer: ${id} is already answered (${q.evidence ?? 'no event'})\n`); return 1; }
+  // An answer is the user's. From Claude Code it must quote a message the user
+  // sent after the question was asked; the quote travels with the answer.
+  const who = await requireHuman(ctx, args, {
+    action: `Answering ${id}`,
+    after: Number(q.asked_seq ?? 0),
+    claim: `To the question "${q.question}" the user answers: ${text}`,
+  });
+  if (who.ok === false) { process.stderr.write(`timc answer: ${who.why}\n`); return 2; }
   q.answer = text;
   q.answered = nowIso();
+  if (who.quote) q.quote = who.quote.seq;
   // The verbatim answer is the only thing that can back a `decision_maker: user`.
-  const ev = appendEvent(ctx.P, { type: 'ANSWER_RECEIVED', task: ctx.task.id, actor: 'human', payload: { id, question: q.question, answer: text } });
+  const ev = appendEvent(ctx.P, {
+    type: 'ANSWER_RECEIVED',
+    task: ctx.task.id,
+    actor: 'human',
+    payload: { id, question: q.question, answer: text, via: who.quote ? 'quote' : 'terminal', quote: who.quote },
+  });
   q.evidence = `events#seq=${ev.seq}`;
 
   // The interview stays suspended while any question is still askable: one
@@ -127,6 +144,15 @@ export async function block({ args, ctx }) {
 export async function unblock({ args, ctx }) {
   if (!requireTask(ctx)) return 1;
   const was = ctx.task.suspend?.kind ?? null;
+  // Each suspension has its own way out; unblock only lifts a block.
+  const other = {
+    AWAITING_USER: 'the open questions are answered with `timc answer`',
+    PAUSED: 'a pause ends with `timc resume`',
+    PAUSED_LIMIT: 'a limit pause ends with `timc resume`',
+    RECOVERY_REQUIRED: 'recovery ends with `timc doctor`',
+    ABANDONED: 'an abandoned task stays abandoned — start a new one',
+  }[was];
+  if (other) { process.stderr.write(`timc unblock: ${ctx.task.id} is ${was}, not BLOCKED — ${other}\n`); return 2; }
   ctx.task.suspend = null;
   ctx.task = saveTask(ctx.P, ctx.task);
   appendEvent(ctx.P, { type: 'RESUMED', task: ctx.task.id, payload: { from: was } });
@@ -149,7 +175,7 @@ export async function abandon({ args, ctx }) {
   const reason = args.positional.join(' ').trim() || String(args.flags.reason ?? '').trim();
   if (!reason) { process.stderr.write('timc abandon: --reason "<why>" is required\n'); return 1; }
   setSuspend(ctx, 'ABANDONED', reason);
-  appendEvent(ctx.P, { type: 'TASK_ABANDONED', task: ctx.task.id, actor: 'human', payload: { reason } });
+  appendEvent(ctx.P, { type: 'TASK_ABANDONED', task: ctx.task.id, actor: actorName(), payload: { reason } });
   process.stdout.write(`${c.dim('×')} ${ctx.task.id} abandoned — ${reason}\n`);
   return 0;
 }

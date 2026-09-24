@@ -35,7 +35,10 @@ export async function brief({ args, ctx }) {
   } catch { /* auditing must never block the brief */ }
 
   if (args.flags.hook) {
-    process.stdout.write(`${JSON.stringify({ additionalContext: built.text })}\n`);
+    // Claude Code only reads additionalContext inside hookSpecificOutput.
+    process.stdout.write(`${JSON.stringify({
+      hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: built.text },
+    })}\n`);
     return 0;
   }
   if (args.flags.json) {

@@ -45,7 +45,8 @@ export function reconcile(ctx) {
   if (task?.external?.branch && facts.branch && task.external.branch !== facts.branch && task.track !== 'trivial') {
     findings.push({ level: 'warn', text: `you are on branch ${facts.branch}, the task was started on ${task.external.branch}` });
   }
-  if (!G.isClean(ctx.timcDir)) {
+  // run/record append to runtime/ without the lock, so those are expected to be pending.
+  if (G.dirtyPaths(ctx.timcDir).some((p) => !p.startsWith('runtime/'))) {
     findings.push({ level: 'warn', text: '.timc has uncommitted changes — `timc doctor` will commit them' });
   }
 

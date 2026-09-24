@@ -22,7 +22,7 @@ test('trivial task: init -> build -> evidence -> close', async (t) => {
   const created = timc(repo, ['new', 'fix label typo in reestr', '--json']);
   assert.equal(created.code, 0, created.err);
   assert.equal(created.json.track, 'trivial');
-  assert.equal(git(repo, ['rev-parse', '--abbrev-ref', 'HEAD']), 'master', 'trivial stays on the current branch (D-4)');
+  assert.equal(git(repo, ['rev-parse', '--abbrev-ref', 'HEAD']), 'main', 'trivial stays on the current branch (D-4)');
 
   // --- phase ------------------------------------------------------------
   assert.equal(timc(repo, ['phase', 'advance', '--json']).json.to, 'BUILDING');

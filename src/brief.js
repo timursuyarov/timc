@@ -161,7 +161,7 @@ function specSection(task, step) {
   const relevant = step?.acceptance ? acs.filter((a) => a.id === step.acceptance) : acs;
   const lines = ['## [3] SPEC (acceptance criteria)'];
   for (const ac of (relevant.length ? relevant : acs).slice(0, 8)) {
-    lines.push(`- ${ac.id}: ${ac.text}${ac.verified_by ? ' [verified]' : ''}`);
+    lines.push(`- ${ac.id}: ${ac.text}${task.verifications?.[ac.id] ? ' [verified]' : ''}`);
   }
   const flags = ['schema_change', 'public_api_change', 'migration_required', 'security_relevant']
     .filter((k) => meta[k]);

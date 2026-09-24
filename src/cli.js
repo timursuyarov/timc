@@ -33,14 +33,19 @@ const COMMANDS = {
   pause: () => import('./commands/suspend.js'),
   abandon: () => import('./commands/suspend.js'),
   selftest: () => import('./commands/selftest.js'),
+  approve: () => import('./commands/approve.js'),
+  verify: () => import('./commands/verify.js'),
+  retrack: () => import('./commands/retrack.js'),
+  prompt: () => import('./commands/prompt.js'),
 };
 
 /** Commands that change state and therefore need the lock. */
-// `run` and `record` only append to the evidence log, so they stay lock-free:
-// a hook must never lose evidence because another session holds the lock.
+// `run`, `record` and `prompt` only append to logs, so they stay lock-free:
+// a hook must never lose evidence (or a user message) because another session holds the lock.
 const MUTATING = new Set([
   'init', 'new', 'step', 'phase', 'checkpoint', 'resume', 'decide', 'final',
   'doctor', 'suspend', 'ask', 'answer', 'block', 'unblock', 'pause', 'abandon',
+  'approve', 'verify', 'retrack',
 ]);
 
 const HELP = `timc — durable engineering pipeline (V0)
@@ -50,9 +55,12 @@ const HELP = `timc — durable engineering pipeline (V0)
   timc status [-v] [--json]      Where the pipeline stands
   timc next [--json]             The single next allowed action
   timc brief [--budget N]        Deterministic context pack for the current phase
-  timc phase advance|set <P>     Move phases (gates are enforced)
+  timc phase advance|set <P>     Move phases (gates are enforced; set --force is the user's)
   timc frontier                  What is askable / workable right now
-  timc step add|list|start|complete|fail|skip
+  timc step add|list|start|complete|fail|skip|edit|remove|reset
+  timc approve plan|seam <ID>    The user approves the plan / a new test seam
+  timc verify <AC-ID>            Link an acceptance criterion to recorded evidence
+  timc retrack <track>           Raise the track (lowering it is the user's)
   timc run -- <cmd>              Run a command and record evidence
   timc checkpoint [--auto]       Snapshot state + dirty worktree
   timc resume [--json]           Reconcile state with git and say what to do
@@ -64,6 +72,10 @@ const HELP = `timc — durable engineering pipeline (V0)
   timc selftest                  Run the acceptance tests
 
 Hook mode (used by hooks.json): --hook reads the event JSON on stdin.
+
+User decisions (answer, approve, phase set --force, lowering a track, step reset,
+verify --waive) run as-is from your own terminal. From Claude Code they need
+--quote events#seq=N: the message you typed, recorded by the UserPromptSubmit hook.
 `;
 
 /** @param {string[]} argv */

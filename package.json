@@ -12,7 +12,7 @@
     "timc": "./bin/timc"
   },
   "scripts": {
-    "test": "node --test",
+    "test": "node --test test/*.test.js",
     "typecheck": "npx -y -p typescript@5 tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {

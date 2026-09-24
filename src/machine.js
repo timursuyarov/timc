@@ -1,8 +1,9 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import YAML from 'yaml';
 import { readText } from './io.js';
-import { verifyStep } from './evidence.js';
+import { allEvidence, verifyStep } from './evidence.js';
 import * as G from './git.js';
 
 /**
@@ -118,6 +119,12 @@ export function hasContent(body) {
     .length > 0;
 }
 
+/** A front matter value still holding the template's placeholder. */
+export function isPlaceholder(v) {
+  const s = String(v ?? '').trim();
+  return !s || /^(todo|tbd|tbc|fixme|\?+|…|\.\.\.|-|<[^>]*>)$/i.test(s);
+}
+
 export const stepsOf = (task) => (Array.isArray(task?.steps) ? task.steps : []);
 export const stepById = (task, id) => stepsOf(task).find((s) => s.id === id) ?? null;
 
@@ -214,7 +221,8 @@ export function dependsOnTransitively(task, stepId, targetId) {
  * → contract. The ordering is the whole point, so the CLI enforces it.
  */
 export function expandContractProblems(task) {
-  const steps = stepsOf(task);
+  // A skipped step never runs, so it cannot break the ordering.
+  const steps = stepsOf(task).filter((s) => s.status !== 'skipped');
   const expands = steps.filter((s) => s.kind === 'expand');
   const migrates = steps.filter((s) => s.kind === 'migrate');
   const contracts = steps.filter((s) => s.kind === 'contract');
@@ -298,6 +306,10 @@ export const GUARDS = {
     const meta = frontMatter(text);
     const acs = Array.isArray(meta?.acceptance_criteria) ? meta.acceptance_criteria : [];
     if (!acs.length) missing.push('spec.md front matter needs at least one acceptance_criteria entry');
+    for (const ac of acs) {
+      if (!ac?.id) missing.push('every acceptance criterion needs an id');
+      else if (isPlaceholder(ac.text)) missing.push(`${ac.id}: text is still a placeholder — write the criterion`);
+    }
     const unknown = (meta?.assumptions ?? []).filter((a) => String(a?.level).toUpperCase() === 'UNKNOWN');
     if (unknown.length) missing.push(`${unknown.length} assumption(s) still UNKNOWN — confirm or downgrade the risk`);
 
@@ -308,8 +320,10 @@ export const GUARDS = {
       missing.push('spec.md declares no seams — name where this gets tested (prefer an existing seam, the highest one, ideally one)');
     } else {
       for (const s of seams) {
-        if (!s?.id || !s?.where) missing.push('every seam needs an id and a "where"');
-        else if (s.kind === 'new' && !s.approved_by) missing.push(`seam ${s.id} is new — a new seam needs the user's approval (approved_by)`);
+        if (!s?.id || isPlaceholder(s?.where)) missing.push(`${s?.id ?? 'a seam'}: needs an id and a real "where" (not a placeholder)`);
+        else if (s.kind === 'new' && !task.approvals?.seams?.[s.id]) {
+          missing.push(`seam ${s.id} is new — the user approves it with \`timc approve seam ${s.id}\``);
+        }
       }
     }
     return missing;
@@ -320,7 +334,10 @@ export const GUARDS = {
     if (!steps.length) missing.push('no steps — add them with `timc step add`');
     for (const s of steps) {
       if (!s.goal) missing.push(`${s.id}: goal is missing`);
-      if (!s.delivers) missing.push(`${s.id}: delivers is missing — say what end-to-end behaviour this slice makes work`);
+      // Only a slice promises end-to-end behaviour; prefactor/expand/migrate/contract are chores by design.
+      if (!s.delivers && (s.kind ?? 'slice') === 'slice') {
+        missing.push(`${s.id}: delivers is missing — say what end-to-end behaviour this slice makes work`);
+      }
       if (!Array.isArray(s.touches) || !s.touches.length) missing.push(`${s.id}: touches[] is missing (needed for drift detection)`);
       if (!Array.isArray(s.validate) || !s.validate.length) missing.push(`${s.id}: validate[] is missing (nothing could prove it works)`);
     }
@@ -335,8 +352,11 @@ export const GUARDS = {
   BUILDING(ctx, task) {
     const missing = [];
     if (task.suspend) missing.push(`task is suspended (${task.suspend.kind}) — resolve it first`);
-    if (task.track !== 'trivial' && !stepsOf(task).length) {
-      missing.push('no steps — a non-trivial task needs a plan before implementation');
+    if (task.track !== 'trivial') {
+      if (!stepsOf(task).length) missing.push('no steps — a non-trivial task needs a plan before implementation');
+      const ok = task.approvals?.plan;
+      if (!ok) missing.push('the user has not approved the plan — `timc approve plan`');
+      else if (ok.hash !== planHash(task)) missing.push('the plan changed after it was approved — `timc approve plan` again');
     }
     return missing;
   },
@@ -356,7 +376,8 @@ export const GUARDS = {
     if (!allStepsClosed(task)) missing.push('not every step is done or skipped');
     const acs = readSpecMeta(task)?.acceptance_criteria ?? [];
     for (const ac of acs) {
-      if (!ac.verified_by) missing.push(`${ac.id}: no verification evidence recorded`);
+      const v = verificationProblem(ctx, task, ac.id);
+      if (v) missing.push(v);
     }
     return missing;
   },
@@ -373,6 +394,34 @@ export const GUARDS = {
     return missing;
   },
 };
+
+/** Fingerprint of what the user approves: the steps, not their progress. */
+export function planHash(task) {
+  const shape = stepsOf(task).map((s) => ({
+    id: s.id, goal: s.goal ?? null, delivers: s.delivers ?? null, kind: s.kind ?? 'slice',
+    depends_on: s.depends_on ?? [], touches: s.touches ?? [], validate: s.validate ?? [], acceptance: s.acceptance ?? null,
+  }));
+  return crypto.createHash('sha256').update(JSON.stringify(shape)).digest('hex').slice(0, 16);
+}
+
+/**
+ * Why an acceptance criterion is not verified, or null when it is. Only
+ * `timc verify` writes task.verifications, and the evidence it names must still
+ * be in the log, green, and produced by a finished step that covers this AC —
+ * a hand-written `verified_by` in spec.md counts for nothing.
+ */
+export function verificationProblem(ctx, task, acId) {
+  const v = task.verifications?.[acId];
+  if (!v) return `${acId}: not verified — \`timc verify ${acId}\``;
+  if (v.waived) return null;
+  const rec = allEvidence(ctx.P).find((e) => e.id === v.evidence && (!e.task || e.task === task.id));
+  if (!rec) return `${acId}: evidence ${v.evidence} is not in the evidence log`;
+  if (rec.exit !== 0) return `${acId}: evidence ${v.evidence} did not pass (exit ${rec.exit})`;
+  const step = stepById(task, rec.step);
+  if (!step || step.acceptance !== acId) return `${acId}: evidence ${v.evidence} belongs to ${rec.step ?? 'no step'}, which does not cover ${acId}`;
+  if (step.status !== 'done') return `${acId}: ${step.id} is ${step.status}, not done`;
+  return null;
+}
 
 /** @returns {{ok: boolean, to: string|null, missing: string[]}} */
 export function canAdvance(ctx, task) {
@@ -526,9 +575,12 @@ function gateCommand(to, task) {
     case 'ARCH_REVIEW': return '/timc review --arch';
     case 'PLANNING': return '/timc spec';
     case 'READY': return '/timc plan';
-    case 'BUILDING': return '/timc implement';
+    case 'BUILDING':
+      return task.track !== 'trivial' && (!task.approvals?.plan || task.approvals.plan.hash !== planHash(task))
+        ? 'timc approve plan   # the user runs it, or pass --quote events#seq=N'
+        : '/timc implement';
     case 'VERIFYING': return `timc step start ${actionableStep(task)?.id ?? '<step>'}`;
-    case 'LANDING': return '/timc verify';
+    case 'LANDING': return 'timc verify <AC-ID>';
     case 'DONE': return 'timc final --render';
     default: return 'timc status -v';
   }

@@ -77,6 +77,18 @@ export function workflowYaml() {
     limits: { step_retries: 3, review_cycles: 2, brief_budget_tokens: 4000 },
     budgets: { task_usd: 15, day_usd: 60, warn_at: 0.8 },
     checkpoint: { mode: 'refs', keep_days: 30 },
+    // Optional calibrated decisions (TypeSafe Jev). Off by default. Jev can only make
+    // TIMC stricter: raise a track, refuse a quote that does not approve, warn.
+    // provider: typesafe (TYPESAFE_API_KEY) | openrouter (OPENROUTER_API_KEY)
+    jev: {
+      enabled: false,
+      provider: 'openrouter',
+      model: null,
+      uses: ['classify', 'quote', 'slice', 'verify'],
+      required: false,
+      timeout_ms: 5000,
+      thresholds: { reject_below: 0.3, warn_below: 0.7, upgrade_at: 0.75 },
+    },
   }, { lineWidth: 0 });
 }
 
@@ -97,6 +109,21 @@ export function agentsYaml() {
     fallback: { order: ['claude', 'codex'], on: ['rate_limit', 'overloaded', 'billing_error'] },
   }, { lineWidth: 0 });
 }
+
+/**
+ * .timc/.gitignore. The event log, evidence and checkpoint records are the
+ * audit trail, so they are committed; only caches and per-session scratch are
+ * ignored. (V0 ignored all of runtime/, which lost the journal on every clone.)
+ */
+export const TIMC_GITIGNORE = [
+  'runtime/state.json',
+  'runtime/.lock',
+  'runtime/briefs/',
+  'runtime/sessions.ndjson',
+  'runtime/usage.ndjson',
+  'runtime/checkpoints/*.patch',
+  '',
+].join('\n');
 
 export function permissionsYaml() {
   return YAML.stringify({
